@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>관리자 채팅</title>
+<style>
+  body { font-family: sans-serif; max-width: 720px; margin: 40px auto; display: flex; gap: 16px; }
+  h1 { font-size: 18px; }
+  #sidebar { width: 200px; flex-shrink: 0; }
+  #conversations { list-style: none; margin: 0; padding: 0; border: 1px solid #ccc; height: 440px; overflow-y: auto; }
+  #conversations li { padding: 8px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 13px; }
+  #conversations li:hover { background: #f5f5f5; }
+  #conversations li.active { background: #e8f0fe; font-weight: bold; }
+  #main { flex: 1; }
+  #messages { border: 1px solid #ccc; height: 400px; overflow-y: auto; padding: 8px; margin-bottom: 8px; }
+  #messages > div { margin-bottom: 6px; }
+  .mine { text-align: right; color: #d93025; }
+  .other { text-align: left; color: #333; }
+  .translated { font-size: 12px; color: #888; font-style: italic; margin-top: 2px; }
+  form { display: flex; gap: 8px; }
+  #input { flex: 1; padding: 8px; }
+  button { padding: 8px 16px; }
+</style>
+</head>
+<body>
+  <div id="sidebar">
+    <h1>대화 목록</h1>
+    <ul id="conversations"></ul>
+  </div>
+  <div id="main">
+    <h1>관리자 화면</h1>
+    <div id="messages"></div>
+    <form id="form">
+      <input id="input" autocomplete="off" placeholder="메시지를 입력하세요" disabled />
+      <button type="submit">전송</button>
+    </form>
+  </div>
+
+  <script src="socket.io/socket.io.js"></script>
+  <script>
+    const ROLE = 'admin';
+    const BASE_PATH = location.pathname.replace(/[^/]*$/, '');
+    const socket = io({ path: `${BASE_PATH}socket.io/`, query: { role: ROLE } });
+    const messages = document.getElementById('messages');
+    const form = document.getElementById('form');
+    const input = document.getElementById('input');
+    const conversationsEl = document.getElementById('conversations');
+
+    let activeConversationKey = null;
+
+    function addMessage(sender, text, translatedText) {
+      const wrapper = document.createElement('div');
+      wrapper.className = sender === ROLE ? 'mine' : 'other';
+
+      const original = document.createElement('div');
+      original.textContent = text;
+      wrapper.appendChild(original);
+
+      if (sender !== ROLE && translatedText) {
+        const translated = document.createElement('div');
+        translated.className = 'translated';
+        translated.textContent = translatedText;
+        wrapper.appendChild(translated);
+      }
+
+      messages.appendChild(wrapper);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    async function loadConversations() {
+      const conversations = await fetch(`${BASE_PATH}api/conversations`).then((r) => r.json());
+      conversationsEl.innerHTML = '';
+      conversations.forEach((c) => {
+        const li = document.createElement('li');
+        li.textContent = c.label;
+        li.className = c.conversationKey === activeConversationKey ? 'active' : '';
+        li.addEventListener('click', () => selectConversation(c.conversationKey));
+        conversationsEl.appendChild(li);
+      });
+    }
+
+    function selectConversation(conversationKey) {
+      activeConversationKey = conversationKey;
+      messages.innerHTML = '';
+      input.disabled = false;
+      socket.emit('join_conversation', conversationKey);
+      loadConversations();
+    }
+
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text || !activeConversationKey) return;
+      socket.emit('send_message', { message: text, conversationKey: activeConversationKey });
+      addMessage(ROLE, text);
+      input.value = '';
+    });
+
+    socket.on('chat_history', (history) => {
+      messages.innerHTML = '';
+      history.forEach(({ sender, message, translated_text }) => addMessage(sender, message, translated_text));
+    });
+
+    socket.on('receive_message', ({ sender, message, translated_text }) => {
+      addMessage(sender, message, translated_text);
+    });
+
+    socket.on('conversation_activity', () => {
+      loadConversations();
+    });
+
+    loadConversations();
+  </script>
+</body>
+</html>

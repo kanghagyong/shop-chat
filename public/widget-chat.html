@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>고객센터</title>
+<style>
+  html, body { height: 100%; margin: 0; }
+  body { font-family: sans-serif; display: flex; flex-direction: column; height: 100%; }
+  #header { background: #1a73e8; color: #fff; padding: 12px 16px; font-size: 14px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+  #closeBtn { background: none; border: none; color: #fff; font-size: 18px; cursor: pointer; line-height: 1; }
+
+  #emailGate { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 24px; gap: 12px; text-align: center; }
+  #emailGate p { font-size: 13px; color: #555; margin: 0 0 4px; }
+  #emailGate input { width: 100%; max-width: 240px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+  #emailGate button { padding: 8px 16px; background: #1a73e8; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+
+  #chatArea { flex: 1; display: none; flex-direction: column; min-height: 0; }
+  #messages { flex: 1; overflow-y: auto; padding: 10px; }
+  #messages > div { margin-bottom: 8px; }
+  .mine { text-align: right; color: #1a73e8; }
+  .other { text-align: left; color: #333; }
+  .translated { font-size: 12px; color: #888; font-style: italic; margin-top: 2px; }
+  #form { display: flex; gap: 6px; padding: 8px; border-top: 1px solid #eee; flex-shrink: 0; }
+  #input { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+  #sendBtn { padding: 8px 14px; background: #1a73e8; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+</style>
+</head>
+<body>
+  <div id="header">
+    <span>고객센터</span>
+    <button id="closeBtn" type="button" aria-label="닫기">&times;</button>
+  </div>
+
+  <div id="emailGate">
+    <p>상담을 위해 이메일 주소를 입력해주세요.</p>
+    <input id="emailInput" type="email" placeholder="you@example.com" autocomplete="email" />
+    <button id="emailSubmit" type="button">시작하기</button>
+  </div>
+
+  <div id="chatArea">
+    <div id="messages"></div>
+    <form id="form">
+      <input id="input" autocomplete="off" placeholder="메시지를 입력하세요" />
+      <button id="sendBtn" type="submit">전송</button>
+    </form>
+  </div>
+
+  <script src="socket.io/socket.io.js"></script>
+  <script>
+    const ROLE = 'user';
+    const EMAIL_KEY = 'shopChatEmail';
+    const BASE_PATH = location.pathname.replace(/[^/]*$/, '');
+
+    const emailGate = document.getElementById('emailGate');
+    const emailInput = document.getElementById('emailInput');
+    const emailSubmit = document.getElementById('emailSubmit');
+    const chatArea = document.getElementById('chatArea');
+    const messages = document.getElementById('messages');
+    const form = document.getElementById('form');
+    const input = document.getElementById('input');
+    const closeBtn = document.getElementById('closeBtn');
+
+    closeBtn.addEventListener('click', () => {
+      window.parent.postMessage({ type: 'shop-chat:close' }, '*');
+    });
+
+    function addMessage(sender, text, translatedText) {
+      const wrapper = document.createElement('div');
+      wrapper.className = sender === ROLE ? 'mine' : 'other';
+
+      const original = document.createElement('div');
+      original.textContent = text;
+      wrapper.appendChild(original);
+
+      if (sender !== ROLE && translatedText) {
+        const translated = document.createElement('div');
+        translated.className = 'translated';
+        translated.textContent = translatedText;
+        wrapper.appendChild(translated);
+      }
+
+      messages.appendChild(wrapper);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    function startChat(email) {
+      emailGate.style.display = 'none';
+      chatArea.style.display = 'flex';
+
+      const socket = io({ path: `${BASE_PATH}socket.io/`, query: { role: ROLE, guestId: email } });
+
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const text = input.value.trim();
+        if (!text) return;
+        socket.emit('send_message', { message: text });
+        addMessage(ROLE, text);
+        input.value = '';
+      });
+
+      socket.on('chat_history', (history) => {
+        history.forEach(({ sender, message, translated_text }) => addMessage(sender, message, translated_text));
+      });
+
+      socket.on('receive_message', ({ sender, message, translated_text }) => {
+        addMessage(sender, message, translated_text);
+      });
+    }
+
+    function isValidEmail(value) {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+    }
+
+    emailSubmit.addEventListener('click', () => {
+      const email = emailInput.value.trim();
+      if (!isValidEmail(email)) {
+        alert('올바른 이메일 주소를 입력해주세요.');
+        return;
+      }
+      localStorage.setItem(EMAIL_KEY, email);
+      startChat(email);
+    });
+
+    const savedEmail = localStorage.getItem(EMAIL_KEY);
+    if (savedEmail) {
+      startChat(savedEmail);
+    }
+  </script>
+</body>
+</html>
