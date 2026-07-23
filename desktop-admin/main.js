@@ -1,14 +1,34 @@
 const { app, BrowserWindow, Tray, Menu, Notification, ipcMain, session, nativeImage } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
 const BASE_URL = process.env.SHOP_CHAT_ADMIN_URL || 'https://monitor.betterwaysys.com/s-chat/admin.html';
-const SITE = process.env.SHOP_CHAT_SITE || '';
-const ADMIN_URL = SITE ? `${BASE_URL}?site=${encodeURIComponent(SITE)}` : BASE_URL;
+const FIXED_SITE = process.env.SHOP_CHAT_SITE || '';
+const CONFIG_PATH = path.join(app.getPath('userData'), 'config.json');
 
 let mainWindow;
+let settingsWindow;
 let tray;
 
-function createWindow() {
+function loadConfig() {
+  try {
+    return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+  } catch (err) {
+    return {};
+  }
+}
+
+function saveConfig(config) {
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config));
+}
+
+function buildAdminUrl(config) {
+  const site = FIXED_SITE || config.site || '';
+  const hash = new URLSearchParams({ token: config.token || '', site }).toString();
+  return `${BASE_URL}#${hash}`;
+}
+
+function createMainWindow(config) {
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 760,
@@ -19,7 +39,7 @@ function createWindow() {
     },
   });
 
-  mainWindow.loadURL(ADMIN_URL);
+  mainWindow.loadURL(buildAdminUrl(config));
 
   mainWindow.on('close', (event) => {
     if (!app.isQuitting) {
@@ -27,6 +47,21 @@ function createWindow() {
       mainWindow.hide();
     }
   });
+}
+
+function createSettingsWindow() {
+  settingsWindow = new BrowserWindow({
+    width: 420,
+    height: 340,
+    resizable: false,
+    icon: path.join(__dirname, 'icon.png'),
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'settings-preload.js'),
+      contextIsolation: true,
+    },
+  });
+  settingsWindow.loadFile(path.join(__dirname, 'settings.html'));
 }
 
 function createTray() {
@@ -40,6 +75,12 @@ function createTray() {
         click: () => {
           mainWindow.show();
           mainWindow.focus();
+        },
+      },
+      {
+        label: '설정 변경',
+        click: () => {
+          createSettingsWindow();
         },
       },
       {
@@ -62,8 +103,20 @@ app.whenReady().then(() => {
     callback(permission === 'notifications');
   });
 
-  createWindow();
-  createTray();
+  ipcMain.on('save-settings', (event, config) => {
+    saveConfig(config);
+    if (settingsWindow) {
+      settingsWindow.close();
+      settingsWindow = null;
+    }
+    if (mainWindow) {
+      mainWindow.loadURL(buildAdminUrl(config));
+      mainWindow.show();
+    } else {
+      createMainWindow(config);
+      createTray();
+    }
+  });
 
   ipcMain.on('new-message-notification', (event, { title, body, conversationKey }) => {
     if (!Notification.isSupported()) return;
@@ -76,6 +129,14 @@ app.whenReady().then(() => {
     });
     notification.show();
   });
+
+  const config = loadConfig();
+  if (!config.token) {
+    createSettingsWindow();
+  } else {
+    createMainWindow(config);
+    createTray();
+  }
 });
 
 app.on('window-all-closed', (event) => {

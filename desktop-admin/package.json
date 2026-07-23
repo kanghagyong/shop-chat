@@ -17,6 +17,8 @@
     "files": [
       "main.js",
       "preload.js",
+      "settings.html",
+      "settings-preload.js",
       "icon.png"
     ],
     "win": {
