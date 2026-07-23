@@ -1,12 +1,30 @@
 (function () {
+  var BUTTON_LABEL = {
+    ko: '상담',
+    en: 'Chat',
+    jp: 'サポート',
+  };
+  var BUTTON_ARIA = {
+    ko: '상담 채팅 열기',
+    en: 'Open chat',
+    jp: 'チャットを開く',
+  };
+  var FRAME_TITLE = {
+    ko: '고객센터 채팅',
+    en: 'Customer support chat',
+    jp: 'カスタマーサポートチャット',
+  };
+
   var currentScript = document.currentScript;
   var scriptUrl = new URL(currentScript.src);
   var origin = scriptUrl.origin;
   var basePath = scriptUrl.pathname.replace(/[^/]*$/, '');
+  var lng = scriptUrl.searchParams.get('lng') || 'ko';
+  var site = scriptUrl.searchParams.get('site') || '';
 
   var button = document.createElement('button');
-  button.textContent = '상담';
-  button.setAttribute('aria-label', '상담 채팅 열기');
+  button.textContent = BUTTON_LABEL[lng] || BUTTON_LABEL.ko;
+  button.setAttribute('aria-label', BUTTON_ARIA[lng] || BUTTON_ARIA.ko);
   Object.assign(button.style, {
     position: 'fixed',
     right: '20px',
@@ -23,9 +41,10 @@
     zIndex: 2147483000,
   });
 
+  var iframeParams = new URLSearchParams({ lng: lng, site: site });
   var iframe = document.createElement('iframe');
-  iframe.src = origin + basePath + 'widget-chat.html';
-  iframe.title = '고객센터 채팅';
+  iframe.src = origin + basePath + 'widget-chat.html?' + iframeParams.toString();
+  iframe.title = FRAME_TITLE[lng] || FRAME_TITLE.ko;
   Object.assign(iframe.style, {
     position: 'fixed',
     right: '20px',

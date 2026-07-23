@@ -27,29 +27,71 @@
 </head>
 <body>
   <div id="header">
-    <span>고객센터</span>
-    <button id="closeBtn" type="button" aria-label="닫기">&times;</button>
+    <span id="headerTitle"></span>
+    <button id="closeBtn" type="button">&times;</button>
   </div>
 
   <div id="emailGate">
-    <p>상담을 위해 이메일 주소를 입력해주세요.</p>
+    <p id="emailPrompt"></p>
     <input id="emailInput" type="email" placeholder="you@example.com" autocomplete="email" />
-    <button id="emailSubmit" type="button">시작하기</button>
+    <button id="emailSubmit" type="button"></button>
   </div>
 
   <div id="chatArea">
     <div id="messages"></div>
     <form id="form">
-      <input id="input" autocomplete="off" placeholder="메시지를 입력하세요" />
-      <button id="sendBtn" type="submit">전송</button>
+      <input id="input" autocomplete="off" />
+      <button id="sendBtn" type="submit"></button>
     </form>
   </div>
 
   <script src="socket.io/socket.io.js"></script>
   <script>
+    const STRINGS = {
+      ko: {
+        headerTitle: '고객센터',
+        closeAria: '닫기',
+        emailPrompt: '상담을 위해 이메일 주소를 입력해주세요.',
+        emailSubmit: '시작하기',
+        invalidEmail: '올바른 이메일 주소를 입력해주세요.',
+        inputPlaceholder: '메시지를 입력하세요',
+        send: '전송',
+      },
+      en: {
+        headerTitle: 'Support',
+        closeAria: 'Close',
+        emailPrompt: 'Please enter your email to start chatting.',
+        emailSubmit: 'Start',
+        invalidEmail: 'Please enter a valid email address.',
+        inputPlaceholder: 'Type a message',
+        send: 'Send',
+      },
+      jp: {
+        headerTitle: 'サポートセンター',
+        closeAria: '閉じる',
+        emailPrompt: 'チャットを開始するにはメールアドレスを入力してください。',
+        emailSubmit: '開始',
+        invalidEmail: '有効なメールアドレスを入力してください。',
+        inputPlaceholder: 'メッセージを入力してください',
+        send: '送信',
+      },
+    };
+
+    const params = new URLSearchParams(location.search);
+    const LNG = STRINGS[params.get('lng')] ? params.get('lng') : 'ko';
+    const SITE = params.get('site') || '';
+    const T = STRINGS[LNG];
+
     const ROLE = 'user';
     const EMAIL_KEY = 'shopChatEmail';
     const BASE_PATH = location.pathname.replace(/[^/]*$/, '');
+
+    document.getElementById('headerTitle').textContent = T.headerTitle;
+    document.getElementById('closeBtn').setAttribute('aria-label', T.closeAria);
+    document.getElementById('emailPrompt').textContent = T.emailPrompt;
+    document.getElementById('emailSubmit').textContent = T.emailSubmit;
+    document.getElementById('input').placeholder = T.inputPlaceholder;
+    document.getElementById('sendBtn').textContent = T.send;
 
     const emailGate = document.getElementById('emailGate');
     const emailInput = document.getElementById('emailInput');
@@ -87,7 +129,7 @@
       emailGate.style.display = 'none';
       chatArea.style.display = 'flex';
 
-      const socket = io({ path: `${BASE_PATH}socket.io/`, query: { role: ROLE, guestId: email } });
+      const socket = io({ path: `${BASE_PATH}socket.io/`, query: { role: ROLE, guestId: email, site: SITE } });
 
       form.addEventListener('submit', (e) => {
         e.preventDefault();
@@ -114,7 +156,7 @@
     emailSubmit.addEventListener('click', () => {
       const email = emailInput.value.trim();
       if (!isValidEmail(email)) {
-        alert('올바른 이메일 주소를 입력해주세요.');
+        alert(T.invalidEmail);
         return;
       }
       localStorage.setItem(EMAIL_KEY, email);

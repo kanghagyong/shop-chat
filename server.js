@@ -54,6 +54,12 @@ function requireAdminIp(req, res, next) {
   next();
 }
 
+function sanitizeSite(site) {
+  if (typeof site !== 'string') return null;
+  const trimmed = site.trim().slice(0, 50);
+  return /^[a-zA-Z0-9_-]+$/.test(trimmed) ? trimmed : null;
+}
+
 app.use(sessionMiddleware);
 app.use(express.json());
 app.get('/admin.html', requireAdminIp, (req, res, next) => next());
@@ -132,6 +138,7 @@ app.get('/api/conversations', requireAdminIp, async (req, res) => {
             MAX(member_type) AS member_type,
             MAX(user_id) AS user_id,
             MAX(guest_id) AS guest_id,
+            MAX(site) AS site,
             MAX(created_at) AS last_message_at
      FROM chat_message
      WHERE conversation_key != 'legacy'
@@ -152,7 +159,7 @@ app.get('/api/conversations', requireAdminIp, async (req, res) => {
     label:
       r.member_type === 'member'
         ? `[회원] ${usernames[r.user_id] || `#${r.user_id}`}`
-        : `[비회원] ${r.guest_id}`,
+        : `[${r.site || '비회원'}] ${r.guest_id}`,
     lastMessageAt: r.last_message_at,
   }));
 
@@ -192,6 +199,7 @@ io.on('connection', async (socket) => {
       socket.data.memberType = 'guest';
       socket.data.userId = null;
       socket.data.guestId = guestId;
+      socket.data.site = sanitizeSite(query.site);
       socket.data.conversationKey = `guest_${guestId}`;
     }
 
@@ -228,6 +236,15 @@ io.on('connection', async (socket) => {
 
     const { memberType, userId, guestId } = parseConversationKey(conversationKey);
 
+    let site = socket.data.role === 'user' ? socket.data.site || null : null;
+    if (!site) {
+      const [[siteRow]] = await pool.query(
+        'SELECT site FROM chat_message WHERE conversation_key = ? AND site IS NOT NULL ORDER BY id DESC LIMIT 1',
+        [conversationKey]
+      );
+      site = siteRow ? siteRow.site : null;
+    }
+
     let detectedLanguage = null;
     let translatedText = null;
     const targetLanguage = await resolveTargetLanguage(conversationKey, sender);
@@ -240,8 +257,8 @@ io.on('connection', async (socket) => {
     }
 
     const [result] = await pool.query(
-      'INSERT INTO chat_message (sender, conversation_key, member_type, user_id, guest_id, message, detected_lang, translated_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [sender, conversationKey, memberType, userId, guestId, message, detectedLanguage, translatedText]
+      'INSERT INTO chat_message (sender, conversation_key, member_type, user_id, guest_id, site, message, detected_lang, translated_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [sender, conversationKey, memberType, userId, guestId, site, message, detectedLanguage, translatedText]
     );
     const [[saved]] = await pool.query(
       'SELECT sender, message, translated_text, created_at FROM chat_message WHERE id = ?',
