@@ -25,7 +25,10 @@ function saveConfig(config) {
 function buildAdminUrl(config) {
   const site = FIXED_SITE || config.site || '';
   const hash = new URLSearchParams({ token: config.token || '', site }).toString();
-  return `${BASE_URL}#${hash}`;
+  // A query-string cache-buster forces a real navigation (not just an
+  // in-page hash change) so the preload script and admin.html's own script
+  // actually re-run and pick up the newly saved settings.
+  return `${BASE_URL}?_=${Date.now()}#${hash}`;
 }
 
 function createMainWindow(config) {
