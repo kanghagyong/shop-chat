@@ -133,6 +133,7 @@ app.get('/api/conversations', requireAdminIp, async (req, res) => {
     return res.status(403).json({ error: 'invalid admin token' });
   }
 
+  const siteFilter = sanitizeSite(req.query.site);
   const [rows] = await pool.query(
     `SELECT conversation_key,
             MAX(member_type) AS member_type,
@@ -141,9 +142,10 @@ app.get('/api/conversations', requireAdminIp, async (req, res) => {
             MAX(site) AS site,
             MAX(created_at) AS last_message_at
      FROM chat_message
-     WHERE conversation_key != 'legacy'
+     WHERE conversation_key != 'legacy'${siteFilter ? ' AND site = ?' : ''}
      GROUP BY conversation_key
-     ORDER BY last_message_at DESC`
+     ORDER BY last_message_at DESC`,
+    siteFilter ? [siteFilter] : []
   );
 
   const memberIds = [...new Set(rows.filter((r) => r.member_type === 'member').map((r) => r.user_id))];
@@ -266,7 +268,13 @@ io.on('connection', async (socket) => {
     );
 
     socket.to(conversationKey).emit('receive_message', saved);
-    io.emit('conversation_activity', { conversationKey });
+    io.emit('conversation_activity', {
+      conversationKey,
+      sender,
+      site,
+      message: saved.message,
+      translatedText: saved.translated_text,
+    });
   });
 
   socket.on('disconnect', () => {
