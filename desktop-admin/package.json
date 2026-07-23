@@ -1,0 +1,31 @@
+{
+  "name": "shop-chat-admin-desktop",
+  "version": "1.0.0",
+  "description": "Windows desktop wrapper for the shop-chat admin console with native new-message notifications",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.betterwaysys.shopchat.admin",
+    "productName": "ShopChat Admin",
+    "files": [
+      "main.js",
+      "preload.js",
+      "icon.png"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
