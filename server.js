@@ -33,8 +33,30 @@ const sessionMiddleware = session({
   cookie: { maxAge: 1000 * 60 * 60 * 24 * 7 },
 });
 
+function getClientIp(headers, fallbackAddress) {
+  const forwarded = headers['x-forwarded-for'];
+  if (forwarded) return forwarded.split(',')[0].trim();
+  return (fallbackAddress || '').replace(/^::ffff:/, '');
+}
+
+function isAllowedAdminIp(ip) {
+  const allowed = (process.env.ADMIN_ALLOWED_IPS || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return allowed.includes(ip);
+}
+
+function requireAdminIp(req, res, next) {
+  if (!isAllowedAdminIp(getClientIp(req.headers, req.socket.remoteAddress))) {
+    return res.status(403).send('Forbidden');
+  }
+  next();
+}
+
 app.use(sessionMiddleware);
 app.use(express.json());
+app.get('/admin.html', requireAdminIp, (req, res, next) => next());
 app.use(express.static(path.join(__dirname, 'public')));
 io.engine.use(sessionMiddleware);
 
@@ -100,7 +122,7 @@ function isValidAdminToken(token) {
   return typeof token === 'string' && token.length > 0 && token === process.env.ADMIN_TOKEN;
 }
 
-app.get('/api/conversations', async (req, res) => {
+app.get('/api/conversations', requireAdminIp, async (req, res) => {
   if (!isValidAdminToken(req.get('x-admin-token'))) {
     return res.status(403).json({ error: 'invalid admin token' });
   }
@@ -143,9 +165,12 @@ io.on('connection', async (socket) => {
   const query = socket.handshake.query;
   const role = query.role === 'admin' ? 'admin' : 'user';
 
-  if (role === 'admin' && !isValidAdminToken(query.adminToken)) {
-    socket.disconnect();
-    return;
+  if (role === 'admin') {
+    const clientIp = getClientIp(socket.handshake.headers, socket.handshake.address);
+    if (!isAllowedAdminIp(clientIp) || !isValidAdminToken(query.adminToken)) {
+      socket.disconnect();
+      return;
+    }
   }
 
   socket.data.role = role;
