@@ -49,7 +49,7 @@ function createMainWindow(config) {
   });
 }
 
-function createSettingsWindow() {
+function createSettingsWindow(config) {
   settingsWindow = new BrowserWindow({
     width: 420,
     height: 340,
@@ -61,7 +61,9 @@ function createSettingsWindow() {
       contextIsolation: true,
     },
   });
-  settingsWindow.loadFile(path.join(__dirname, 'settings.html'));
+  settingsWindow.loadFile(path.join(__dirname, 'settings.html'), {
+    query: { token: (config && config.token) || '', site: (config && config.site) || '' },
+  });
 }
 
 function createTray() {
@@ -80,7 +82,7 @@ function createTray() {
       {
         label: '설정 변경',
         click: () => {
-          createSettingsWindow();
+          createSettingsWindow(loadConfig());
         },
       },
       {
@@ -99,6 +101,8 @@ function createTray() {
 }
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null);
+
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
     callback(permission === 'notifications');
   });
@@ -132,7 +136,7 @@ app.whenReady().then(() => {
 
   const config = loadConfig();
   if (!config.token) {
-    createSettingsWindow();
+    createSettingsWindow(config);
   } else {
     createMainWindow(config);
     createTray();

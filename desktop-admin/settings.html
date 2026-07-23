@@ -7,7 +7,7 @@
   body { font-family: sans-serif; padding: 24px; }
   h2 { font-size: 16px; margin-top: 0; }
   label { display: block; margin-bottom: 4px; font-size: 13px; color: #333; }
-  input { width: 100%; padding: 8px; margin-bottom: 16px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+  input, select { width: 100%; padding: 8px; margin-bottom: 16px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
   button { padding: 8px 20px; background: #1a73e8; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
 </style>
 </head>
@@ -16,15 +16,25 @@
   <form id="form">
     <label for="token">관리자 토큰</label>
     <input id="token" type="text" required />
-    <label for="site">사이트 필터 (선택, 비워두면 전체 보기)</label>
-    <input id="site" type="text" />
+    <label for="site">사이트 필터</label>
+    <select id="site">
+      <option value="">전체</option>
+      <option value="redprinting">redprinting</option>
+      <option value="roiprinting">roiprinting</option>
+      <option value="oneprint">oneprint</option>
+      <option value="singapore">singapore</option>
+    </select>
     <button type="submit">저장하고 시작</button>
   </form>
   <script>
+    const params = new URLSearchParams(location.search);
+    document.getElementById('token').value = params.get('token') || '';
+    document.getElementById('site').value = params.get('site') || '';
+
     document.getElementById('form').addEventListener('submit', (e) => {
       e.preventDefault();
       const token = document.getElementById('token').value.trim();
-      const site = document.getElementById('site').value.trim();
+      const site = document.getElementById('site').value;
       if (!token) return;
       window.settingsAPI.save({ token, site });
     });
