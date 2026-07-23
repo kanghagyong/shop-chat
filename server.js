@@ -96,7 +96,15 @@ app.get('/api/me', (req, res) => {
   }
 });
 
+function isValidAdminToken(token) {
+  return typeof token === 'string' && token.length > 0 && token === process.env.ADMIN_TOKEN;
+}
+
 app.get('/api/conversations', async (req, res) => {
+  if (!isValidAdminToken(req.get('x-admin-token'))) {
+    return res.status(403).json({ error: 'invalid admin token' });
+  }
+
   const [rows] = await pool.query(
     `SELECT conversation_key,
             MAX(member_type) AS member_type,
@@ -134,6 +142,12 @@ io.on('connection', async (socket) => {
 
   const query = socket.handshake.query;
   const role = query.role === 'admin' ? 'admin' : 'user';
+
+  if (role === 'admin' && !isValidAdminToken(query.adminToken)) {
+    socket.disconnect();
+    return;
+  }
+
   socket.data.role = role;
 
   if (role === 'user') {

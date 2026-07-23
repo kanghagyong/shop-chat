@@ -40,7 +40,15 @@
   <script>
     const ROLE = 'admin';
     const BASE_PATH = location.pathname.replace(/[^/]*$/, '');
-    const socket = io({ path: `${BASE_PATH}socket.io/`, query: { role: ROLE } });
+    const ADMIN_TOKEN_KEY = 'shopChatAdminToken';
+
+    let adminToken = localStorage.getItem(ADMIN_TOKEN_KEY);
+    while (!adminToken) {
+      adminToken = prompt('관리자 토큰을 입력하세요');
+      if (adminToken) localStorage.setItem(ADMIN_TOKEN_KEY, adminToken);
+    }
+
+    const socket = io({ path: `${BASE_PATH}socket.io/`, query: { role: ROLE, adminToken } });
     const messages = document.getElementById('messages');
     const form = document.getElementById('form');
     const input = document.getElementById('input');
@@ -68,7 +76,15 @@
     }
 
     async function loadConversations() {
-      const conversations = await fetch(`${BASE_PATH}api/conversations`).then((r) => r.json());
+      const res = await fetch(`${BASE_PATH}api/conversations`, {
+        headers: { 'x-admin-token': adminToken },
+      });
+      if (res.status === 403) {
+        localStorage.removeItem(ADMIN_TOKEN_KEY);
+        alert('관리자 토큰이 올바르지 않습니다. 새로고침 후 다시 입력해주세요.');
+        return;
+      }
+      const conversations = await res.json();
       conversationsEl.innerHTML = '';
       conversations.forEach((c) => {
         const li = document.createElement('li');
