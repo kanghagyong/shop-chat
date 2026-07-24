@@ -16,13 +16,17 @@
 
   #chatArea { flex: 1; display: none; flex-direction: column; min-height: 0; }
   #messages { flex: 1; overflow-y: auto; padding: 10px; }
-  #messages > div { margin-bottom: 8px; }
+  #messages > div { margin-bottom: 8px; white-space: pre-wrap; }
   .mine { text-align: right; color: #1a73e8; }
   .other { text-align: left; color: #333; }
   .translated { font-size: 12px; color: #888; font-style: italic; margin-top: 2px; }
-  #form { display: flex; gap: 6px; padding: 8px; border-top: 1px solid #eee; flex-shrink: 0; }
-  #input { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+  #form { display: flex; gap: 6px; padding: 8px 8px 2px; border-top: 1px solid #eee; flex-shrink: 0; }
+  #input { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit; resize: none; max-height: 100px; }
   #sendBtn { padding: 8px 14px; background: #1a73e8; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+  #attachBtn { padding: 8px 10px; background: none; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; font-size: 16px; }
+  #inputHint { font-size: 11px; color: #999; padding: 0 8px 8px; flex-shrink: 0; }
+  #messages a { color: inherit; }
+  #messages img { max-width: 160px; max-height: 160px; border-radius: 6px; display: block; }
 </style>
 </head>
 <body>
@@ -40,9 +44,12 @@
   <div id="chatArea">
     <div id="messages"></div>
     <form id="form">
-      <input id="input" autocomplete="off" />
+      <input id="imageInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none;" />
+      <button id="attachBtn" type="button">📎</button>
+      <textarea id="input" autocomplete="off" rows="1"></textarea>
       <button id="sendBtn" type="submit"></button>
     </form>
+    <div id="inputHint"></div>
   </div>
 
   <script src="socket.io/socket.io.js"></script>
@@ -56,6 +63,9 @@
         invalidEmail: '올바른 이메일 주소를 입력해주세요.',
         inputPlaceholder: '메시지를 입력하세요',
         send: '전송',
+        enterHint: 'Shift+Enter로 줄바꿈, Enter로 전송',
+        attachAria: '이미지 첨부',
+        invalidImage: '이미지 파일(jpg, png, gif, webp)만 업로드할 수 있습니다.',
       },
       en: {
         headerTitle: 'Support',
@@ -65,6 +75,9 @@
         invalidEmail: 'Please enter a valid email address.',
         inputPlaceholder: 'Type a message',
         send: 'Send',
+        enterHint: 'Shift+Enter for a new line, Enter to send',
+        attachAria: 'Attach image',
+        invalidImage: 'Only image files (jpg, png, gif, webp) can be uploaded.',
       },
       jp: {
         headerTitle: 'サポートセンター',
@@ -74,6 +87,9 @@
         invalidEmail: '有効なメールアドレスを入力してください。',
         inputPlaceholder: 'メッセージを入力してください',
         send: '送信',
+        enterHint: 'Shift+Enterで改行、Enterで送信',
+        attachAria: '画像を添付',
+        invalidImage: '画像ファイル(jpg, png, gif, webp)のみアップロードできます。',
       },
     };
 
@@ -92,6 +108,8 @@
     document.getElementById('emailSubmit').textContent = T.emailSubmit;
     document.getElementById('input').placeholder = T.inputPlaceholder;
     document.getElementById('sendBtn').textContent = T.send;
+    document.getElementById('inputHint').textContent = T.enterHint;
+    document.getElementById('attachBtn').setAttribute('aria-label', T.attachAria);
 
     const emailGate = document.getElementById('emailGate');
     const emailInput = document.getElementById('emailInput');
@@ -101,23 +119,49 @@
     const form = document.getElementById('form');
     const input = document.getElementById('input');
     const closeBtn = document.getElementById('closeBtn');
+    const imageInput = document.getElementById('imageInput');
+    const attachBtn = document.getElementById('attachBtn');
 
     closeBtn.addEventListener('click', () => {
       window.parent.postMessage({ type: 'shop-chat:close' }, '*');
     });
 
-    function addMessage(sender, text, translatedText) {
+    function escapeHtml(text) {
+      return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function linkify(escapedText) {
+      return escapedText.replace(/(https?:\/\/[^\s<]+)/g, (url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
+    }
+
+    function addMessage(sender, text, translatedText, messageType) {
       const wrapper = document.createElement('div');
       wrapper.className = sender === ROLE ? 'mine' : 'other';
 
       const original = document.createElement('div');
-      original.textContent = text;
+      if (messageType === 'image') {
+        const link = document.createElement('a');
+        link.href = `${BASE_PATH}${text}`;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        const img = document.createElement('img');
+        img.src = `${BASE_PATH}${text}`;
+        link.appendChild(img);
+        original.appendChild(link);
+      } else {
+        original.innerHTML = linkify(escapeHtml(text));
+      }
       wrapper.appendChild(original);
 
       if (sender !== ROLE && translatedText) {
         const translated = document.createElement('div');
         translated.className = 'translated';
-        translated.textContent = translatedText;
+        translated.innerHTML = linkify(escapeHtml(translatedText));
         wrapper.appendChild(translated);
       }
 
@@ -140,12 +184,40 @@
         input.value = '';
       });
 
-      socket.on('chat_history', (history) => {
-        history.forEach(({ sender, message, translated_text }) => addMessage(sender, message, translated_text));
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+          e.preventDefault();
+          form.requestSubmit();
+        }
       });
 
-      socket.on('receive_message', ({ sender, message, translated_text }) => {
-        addMessage(sender, message, translated_text);
+      attachBtn.addEventListener('click', () => imageInput.click());
+
+      imageInput.addEventListener('change', async () => {
+        const file = imageInput.files[0];
+        imageInput.value = '';
+        if (!file) return;
+
+        const formData = new FormData();
+        formData.append('image', file);
+        const res = await fetch(`${BASE_PATH}api/upload`, { method: 'POST', body: formData });
+        if (!res.ok) {
+          alert(T.invalidImage);
+          return;
+        }
+        const { url } = await res.json();
+        socket.emit('send_message', { message: url, messageType: 'image' });
+        addMessage(ROLE, url, null, 'image');
+      });
+
+      socket.on('chat_history', (history) => {
+        history.forEach(({ sender, message, message_type, translated_text }) =>
+          addMessage(sender, message, translated_text, message_type)
+        );
+      });
+
+      socket.on('receive_message', ({ sender, message, message_type, translated_text }) => {
+        addMessage(sender, message, translated_text, message_type);
       });
     }
 
