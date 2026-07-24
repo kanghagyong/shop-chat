@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, Notification, ipcMain, session, nativeImage } = require('electron');
+const { app, BrowserWindow, Tray, Menu, Notification, ipcMain, session, nativeImage, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -43,6 +43,11 @@ function createMainWindow(config) {
   });
 
   mainWindow.loadURL(buildAdminUrl(config));
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
 
   mainWindow.on('close', (event) => {
     if (!app.isQuitting) {

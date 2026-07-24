@@ -3,6 +3,9 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
+const multer = require('multer');
 const session = require('express-session');
 const MySQLStoreFactory = require('express-mysql-session');
 const bcrypt = require('bcryptjs');
@@ -60,6 +63,54 @@ function sanitizeSite(site) {
   return /^[a-zA-Z0-9_-]+$/.test(trimmed) ? trimmed : null;
 }
 
+const UPLOAD_DIR = path.join(__dirname, 'public', 'uploads');
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+const UPLOAD_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 3;
+const IMAGE_EXTENSION_BY_MIME = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+};
+const UPLOADED_IMAGE_PATH = /^uploads\/[0-9a-f-]+\.(jpg|png|gif|webp)$/;
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: UPLOAD_DIR,
+    filename: (req, file, cb) => cb(null, crypto.randomUUID() + IMAGE_EXTENSION_BY_MIME[file.mimetype]),
+  }),
+  fileFilter: (req, file, cb) => cb(null, Boolean(IMAGE_EXTENSION_BY_MIME[file.mimetype])),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
+
+async function cleanupOldUploads() {
+  let files;
+  try {
+    files = await fs.promises.readdir(UPLOAD_DIR);
+  } catch (err) {
+    return;
+  }
+
+  const now = Date.now();
+  await Promise.all(
+    files.map(async (file) => {
+      const filePath = path.join(UPLOAD_DIR, file);
+      try {
+        const stats = await fs.promises.stat(filePath);
+        if (now - stats.mtimeMs > UPLOAD_MAX_AGE_MS) {
+          await fs.promises.unlink(filePath);
+        }
+      } catch (err) {
+        console.error('failed to clean up upload:', file, err.message);
+      }
+    })
+  );
+}
+
+cleanupOldUploads();
+setInterval(cleanupOldUploads, 1000 * 60 * 60);
+
 app.use(sessionMiddleware);
 app.use(express.json());
 app.get('/admin.html', requireAdminIp, (req, res, next) => next());
@@ -68,7 +119,7 @@ io.engine.use(sessionMiddleware);
 
 async function fetchHistory(conversationKey) {
   const [rows] = await pool.query(
-    'SELECT sender, message, translated_text, created_at FROM chat_message WHERE conversation_key = ? ORDER BY id DESC LIMIT ?',
+    'SELECT sender, message, message_type, translated_text, created_at FROM chat_message WHERE conversation_key = ? ORDER BY id DESC LIMIT ?',
     [conversationKey, HISTORY_LIMIT]
   );
   return rows.reverse();
@@ -114,6 +165,14 @@ app.post('/api/login', async (req, res) => {
 
 app.post('/api/logout', (req, res) => {
   req.session.destroy(() => res.json({ ok: true }));
+});
+
+app.post('/api/upload', (req, res) => {
+  upload.single('image')(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    if (!req.file) return res.status(400).json({ error: '지원하지 않는 파일입니다 (jpg, png, gif, webp만 가능)' });
+    res.json({ url: `uploads/${req.file.filename}` });
+  });
 });
 
 app.get('/api/me', (req, res) => {
@@ -221,8 +280,10 @@ io.on('connection', async (socket) => {
     });
   }
 
-  socket.on('send_message', async ({ message, conversationKey: targetKey }) => {
+  socket.on('send_message', async ({ message, conversationKey: targetKey, messageType }) => {
     if (typeof message !== 'string' || !message.trim()) return;
+
+    const type = messageType === 'image' && UPLOADED_IMAGE_PATH.test(message) ? 'image' : 'text';
 
     let conversationKey;
     let sender;
@@ -249,21 +310,23 @@ io.on('connection', async (socket) => {
 
     let detectedLanguage = null;
     let translatedText = null;
-    const targetLanguage = await resolveTargetLanguage(conversationKey, sender);
-    if (targetLanguage) {
-      try {
-        ({ detectedLanguage, translatedText } = await translateMessage(message, targetLanguage));
-      } catch (err) {
-        console.error('translation failed:', err.message);
+    if (type === 'text') {
+      const targetLanguage = await resolveTargetLanguage(conversationKey, sender);
+      if (targetLanguage) {
+        try {
+          ({ detectedLanguage, translatedText } = await translateMessage(message, targetLanguage));
+        } catch (err) {
+          console.error('translation failed:', err.message);
+        }
       }
     }
 
     const [result] = await pool.query(
-      'INSERT INTO chat_message (sender, conversation_key, member_type, user_id, guest_id, site, message, detected_lang, translated_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [sender, conversationKey, memberType, userId, guestId, site, message, detectedLanguage, translatedText]
+      'INSERT INTO chat_message (sender, conversation_key, member_type, user_id, guest_id, site, message, message_type, detected_lang, translated_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [sender, conversationKey, memberType, userId, guestId, site, message, type, detectedLanguage, translatedText]
     );
     const [[saved]] = await pool.query(
-      'SELECT sender, message, translated_text, created_at FROM chat_message WHERE id = ?',
+      'SELECT sender, message, message_type, translated_text, created_at FROM chat_message WHERE id = ?',
       [result.insertId]
     );
 
@@ -273,6 +336,7 @@ io.on('connection', async (socket) => {
       sender,
       site,
       message: saved.message,
+      messageType: saved.message_type,
       translatedText: saved.translated_text,
     });
   });
