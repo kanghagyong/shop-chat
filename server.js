@@ -119,10 +119,27 @@ io.engine.use(sessionMiddleware);
 
 async function fetchHistory(conversationKey) {
   const [rows] = await pool.query(
-    'SELECT sender, message, message_type, translated_text, created_at FROM chat_message WHERE conversation_key = ? ORDER BY id DESC LIMIT ?',
+    'SELECT sender, message, message_type, translated_text, created_at, read_at FROM chat_message WHERE conversation_key = ? ORDER BY id DESC LIMIT ?',
     [conversationKey, HISTORY_LIMIT]
   );
   return rows.reverse();
+}
+
+function otherSocketsInRoom(conversationKey, excludeSocketId) {
+  const room = io.sockets.adapter.rooms.get(conversationKey);
+  if (!room) return false;
+  for (const id of room) {
+    if (id !== excludeSocketId) return true;
+  }
+  return false;
+}
+
+async function markMessagesRead(conversationKey, readerRole) {
+  const otherSender = readerRole === 'user' ? 'admin' : 'user';
+  await pool.query(
+    'UPDATE chat_message SET read_at = NOW() WHERE conversation_key = ? AND sender = ? AND read_at IS NULL',
+    [conversationKey, otherSender]
+  );
 }
 
 function parseConversationKey(conversationKey) {
@@ -265,7 +282,6 @@ io.on('connection', async (socket) => {
     }
 
     socket.join(socket.data.conversationKey);
-    socket.emit('chat_history', await fetchHistory(socket.data.conversationKey));
   } else {
     socket.on('join_conversation', async (conversationKey) => {
       if (typeof conversationKey !== 'string' || !conversationKey) return;
@@ -277,9 +293,14 @@ io.on('connection', async (socket) => {
       socket.data.conversationKey = conversationKey;
 
       socket.emit('chat_history', await fetchHistory(conversationKey));
+      await markMessagesRead(conversationKey, 'admin');
+      socket.to(conversationKey).emit('messages_read', { conversationKey });
     });
   }
 
+  // send_message (and disconnect below) must be registered before any `await`
+  // in this handler runs — otherwise a client that emits immediately after
+  // connecting can race ahead of the listener being attached and get dropped.
   socket.on('send_message', async ({ message, conversationKey: targetKey, messageType }) => {
     if (typeof message !== 'string' || !message.trim()) return;
 
@@ -325,12 +346,21 @@ io.on('connection', async (socket) => {
       'INSERT INTO chat_message (sender, conversation_key, member_type, user_id, guest_id, site, message, message_type, detected_lang, translated_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [sender, conversationKey, memberType, userId, guestId, site, message, type, detectedLanguage, translatedText]
     );
+
+    const recipientPresent = otherSocketsInRoom(conversationKey, socket.id);
+    if (recipientPresent) {
+      await pool.query('UPDATE chat_message SET read_at = NOW() WHERE id = ?', [result.insertId]);
+    }
+
     const [[saved]] = await pool.query(
-      'SELECT sender, message, message_type, translated_text, created_at FROM chat_message WHERE id = ?',
+      'SELECT sender, message, message_type, translated_text, created_at, read_at FROM chat_message WHERE id = ?',
       [result.insertId]
     );
 
     socket.to(conversationKey).emit('receive_message', saved);
+    if (recipientPresent) {
+      socket.emit('messages_read', { conversationKey });
+    }
     io.emit('conversation_activity', {
       conversationKey,
       sender,
@@ -344,6 +374,12 @@ io.on('connection', async (socket) => {
   socket.on('disconnect', () => {
     console.log(`client disconnected: ${socket.id}`);
   });
+
+  if (role === 'user') {
+    socket.emit('chat_history', await fetchHistory(socket.data.conversationKey));
+    await markMessagesRead(socket.data.conversationKey, 'user');
+    socket.to(socket.data.conversationKey).emit('messages_read', { conversationKey: socket.data.conversationKey });
+  }
 });
 
 const PORT = process.env.PORT || 3000;
