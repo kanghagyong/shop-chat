@@ -8,9 +8,11 @@
   h1 { font-size: 18px; }
   #sidebar { width: 200px; flex-shrink: 0; }
   #conversations { list-style: none; margin: 0; padding: 0; border: 1px solid #ccc; height: 440px; overflow-y: auto; }
-  #conversations li { padding: 8px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 13px; }
+  #conversations li { padding: 8px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 13px; display: flex; align-items: center; gap: 6px; }
   #conversations li:hover { background: #f5f5f5; }
   #conversations li.active { background: #e8f0fe; font-weight: bold; }
+  #conversations .star { cursor: pointer; color: #f2b400; flex-shrink: 0; }
+  #conversations .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #siteFilter { font-size: 12px; color: #666; margin-bottom: 8px; }
   #siteFilter button { font-size: 11px; padding: 2px 6px; margin-left: 4px; }
   #main { flex: 1; }
@@ -83,6 +85,10 @@
         changeBtn.type = 'button';
         changeBtn.textContent = '변경';
         changeBtn.addEventListener('click', () => {
+          if (window.shopChatDesktop && window.shopChatDesktop.openSettings) {
+            window.shopChatDesktop.openSettings();
+            return;
+          }
           const next = prompt('필터링할 사이트를 입력하세요 (전체 보기는 비워두고 확인)', siteFilter || '');
           if (next === null) return;
           siteFilter = next;
@@ -182,8 +188,28 @@
       conversationsEl.innerHTML = '';
       conversations.forEach((c) => {
         const li = document.createElement('li');
-        li.textContent = c.label;
         li.className = c.conversationKey === activeConversationKey ? 'active' : '';
+
+        const star = document.createElement('span');
+        star.className = 'star';
+        star.textContent = c.starred ? '★' : '☆';
+        star.title = c.starred ? '즐겨찾기 해제' : '즐겨찾기 추가';
+        star.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          await fetch(`${BASE_PATH}api/conversations/star`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
+            body: JSON.stringify({ conversationKey: c.conversationKey, starred: !c.starred }),
+          });
+          loadConversations();
+        });
+        li.appendChild(star);
+
+        const label = document.createElement('span');
+        label.className = 'label';
+        label.textContent = c.label;
+        li.appendChild(label);
+
         li.addEventListener('click', () => selectConversation(c.conversationKey));
         conversationsEl.appendChild(li);
       });

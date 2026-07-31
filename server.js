@@ -211,16 +211,18 @@ app.get('/api/conversations', requireAdminIp, async (req, res) => {
 
   const siteFilter = sanitizeSite(req.query.site);
   const [rows] = await pool.query(
-    `SELECT conversation_key,
-            MAX(member_type) AS member_type,
-            MAX(user_id) AS user_id,
-            MAX(guest_id) AS guest_id,
-            MAX(site) AS site,
-            MAX(created_at) AS last_message_at
-     FROM chat_message
-     WHERE conversation_key != 'legacy'${siteFilter ? ' AND site = ?' : ''}
-     GROUP BY conversation_key
-     ORDER BY last_message_at DESC`,
+    `SELECT cm.conversation_key,
+            MAX(cm.member_type) AS member_type,
+            MAX(cm.user_id) AS user_id,
+            MAX(cm.guest_id) AS guest_id,
+            MAX(cm.site) AS site,
+            MAX(cm.created_at) AS last_message_at,
+            MAX(cs.conversation_key IS NOT NULL) AS starred
+     FROM chat_message cm
+     LEFT JOIN conversation_star cs ON cs.conversation_key = cm.conversation_key
+     WHERE cm.conversation_key != 'legacy'${siteFilter ? ' AND cm.site = ?' : ''}
+     GROUP BY cm.conversation_key
+     ORDER BY starred DESC, last_message_at DESC`,
     siteFilter ? [siteFilter] : []
   );
 
@@ -239,9 +241,32 @@ app.get('/api/conversations', requireAdminIp, async (req, res) => {
         ? `[회원] ${usernames[r.user_id] || `#${r.user_id}`}`
         : `[${r.site || '비회원'}] ${r.guest_id}`,
     lastMessageAt: r.last_message_at,
+    starred: Boolean(r.starred),
   }));
 
   res.json(conversations);
+});
+
+app.post('/api/conversations/star', requireAdminIp, async (req, res) => {
+  if (!isValidAdminToken(req.get('x-admin-token'))) {
+    return res.status(403).json({ error: 'invalid admin token' });
+  }
+
+  const { conversationKey, starred } = req.body || {};
+  if (typeof conversationKey !== 'string' || !conversationKey) {
+    return res.status(400).json({ error: 'conversationKey required' });
+  }
+
+  if (starred) {
+    await pool.query(
+      'INSERT INTO conversation_star (conversation_key) VALUES (?) ON DUPLICATE KEY UPDATE starred_at = starred_at',
+      [conversationKey]
+    );
+  } else {
+    await pool.query('DELETE FROM conversation_star WHERE conversation_key = ?', [conversationKey]);
+  }
+
+  res.json({ ok: true, starred: Boolean(starred) });
 });
 
 io.on('connection', async (socket) => {

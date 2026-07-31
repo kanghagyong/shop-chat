@@ -115,6 +115,14 @@ app.whenReady().then(() => {
     callback(permission === 'notifications');
   });
 
+  ipcMain.on('open-settings', () => {
+    if (settingsWindow) {
+      settingsWindow.focus();
+      return;
+    }
+    createSettingsWindow(loadConfig());
+  });
+
   ipcMain.on('save-settings', (event, config) => {
     saveConfig(config);
     if (settingsWindow) {

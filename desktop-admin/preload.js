@@ -20,4 +20,5 @@ contextBridge.exposeInMainWorld('shopChatDesktop', {
     ipcRenderer.send('new-message-notification', { title, body, conversationKey }),
   onNotificationClick: (callback) =>
     ipcRenderer.on('notification-clicked', (event, conversationKey) => callback(conversationKey)),
+  openSettings: () => ipcRenderer.send('open-settings'),
 });
